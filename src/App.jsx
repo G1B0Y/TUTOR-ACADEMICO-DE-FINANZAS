@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-// Helper para conectar con Electron de forma segura
-// Si window.require existe, estamos en el .exe. Si no, estamos en web normal.
+// Helper para conectar con Electron
 const ipc = window.require ? window.require('electron').ipcRenderer : null;
 
 // --- ÍCONOS SVG ---
@@ -31,41 +30,31 @@ const VideoIcon = () => (
 const ExamIcon = () => <span className="text-xl">📝</span>;
 
 export default function App() {
-  // --- ESTADOS GLOBALES ---
   const [currentView, setCurrentView] = useState('home');
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [expandedWeek, setExpandedWeek] = useState(null);
-
-  // --- ESTADOS DE DATOS (BD) ---
   const [syllabusData, setSyllabusData] = useState([]); 
   const [examsList, setExamsList] = useState([]); 
-  // IMPORTANTE: Aquí guardamos las notas recuperadas de la BD
   const [userGrades, setUserGrades] = useState({}); 
 
-  // --- ESTADOS DEL EXAMEN INTERACTIVO ---
   const [selectedExam, setSelectedExam] = useState(null);
   const [examQuestions, setExamQuestions] = useState([]);
   const [userAnswers, setUserAnswers] = useState({}); 
   const [examResult, setExamResult] = useState({ submitted: false, grade: 0 });
 
-  // --- ESTADOS DE LOGIN ---
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // --- INICIO ---
   useEffect(() => {
-    // 1. Recuperar sesión al abrir la app
     const savedUser = localStorage.getItem('finanzasUser');
     const savedId = localStorage.getItem('finanzasUserId');
-    
     if (savedUser && savedId) {
       setCurrentUser(savedUser);
       setCurrentUserId(Number(savedId));
-      // 2. Cargar datos y NOTAS de ese usuario
       loadData(Number(savedId));
     } else {
       loadData(null);
@@ -75,177 +64,86 @@ export default function App() {
   const loadData = async (userId) => {
     if (ipc) {
       try {
-        // Cargar Temario
         const data = await ipc.invoke('get-syllabus');
         setSyllabusData(data);
-
-        // Filtrar exámenes
         const allExams = [];
         data.forEach(week => {
           week.materials.forEach(mat => {
-            if (mat.es_evaluable === 1) {
-              allExams.push({ ...mat, weekName: week.title });
-            }
+            if (mat.es_evaluable === 1) allExams.push({ ...mat, weekName: week.title });
           });
         });
         setExamsList(allExams);
-
-        // Cargar NOTAS (Aquí es donde se recupera el progreso)
         if (userId) {
           const result = await ipc.invoke('get-user-grades', userId);
           if (result.success) {
             const gradesMap = {};
-            // Convertimos el array de la BD a un objeto { idExamen: nota }
-            result.grades.forEach(g => {
-              gradesMap[g.material_id] = g.nota;
-            });
+            result.grades.forEach(g => { gradesMap[g.material_id] = g.nota; });
             setUserGrades(gradesMap);
           }
         }
-      } catch (error) {
-        console.error("Error cargando datos:", error);
-      }
+      } catch (error) { console.error("Error cargando datos:", error); }
     } else {
-      // Fallback para modo web
       setSyllabusData(mockSyllabus); 
     }
   };
 
-  // --- MANEJO DE CLICS (ARCHIVOS Y EXÁMENES) ---
   const handleMaterialClick = async (material) => {
-    // CASO 1: ES UN EXAMEN
     if (material.es_evaluable === 1) {
-      if (!currentUser) {
-        alert("Debes iniciar sesión para rendir exámenes.");
-        setShowAuthModal(true);
-        return;
-      }
-
+      if (!currentUser) { setShowAuthModal(true); return; }
       setSelectedExam(material);
       setExamQuestions([]);
       setUserAnswers({});
-      
-      // Verificamos si YA EXISTE una nota guardada para este examen
       const existingGrade = userGrades[material.id];
-      
-      if (existingGrade !== undefined) {
-        // Si ya existe, mostramos el resultado directamente (Persistencia)
-        setExamResult({ submitted: true, grade: existingGrade });
-      } else {
-        // Si no, empezamos de cero
-        setExamResult({ submitted: false, grade: 0 });
-      }
-      
+      setExamResult(existingGrade !== undefined ? { submitted: true, grade: existingGrade } : { submitted: false, grade: 0 });
       setCurrentView('takingExam');
-
-      // Cargamos preguntas desde el backend
       if (ipc) {
         const result = await ipc.invoke('get-random-exam', material.id);
-        if (result.success) {
-          setExamQuestions(result.questions);
-        } else {
-          alert("Error cargando el examen: " + result.message);
-        }
+        if (result.success) setExamQuestions(result.questions);
       }
-    } 
-    // CASO 2: ES UN ARCHIVO (PDF, Excel, Video)
-    else {
-      if (ipc) {
-        const result = await ipc.invoke('open-file-native', { 
-          fileName: material.archivo_ruta, 
-          type: material.tipo 
-        });
-        if (!result.success) alert("No se pudo abrir el archivo: " + result.message);
-      } else {
-        alert("Esta función solo está disponible en la versión de escritorio (.exe).");
-      }
+    } else {
+      if (ipc) await ipc.invoke('open-file-native', { fileName: material.archivo_ruta, type: material.tipo });
+      else alert("Función solo disponible en la versión de escritorio.");
     }
   };
 
-  const handleSelectOption = (qId, altId) => {
-    if (examResult.submitted) return; 
-    setUserAnswers(prev => ({ ...prev, [qId]: altId }));
-  };
+  const handleSelectOption = (qId, altId) => { if (!examResult.submitted) setUserAnswers(prev => ({ ...prev, [qId]: altId })); };
 
   const handleSubmitExam = async () => {
-    if (Object.keys(userAnswers).length < examQuestions.length) {
-      if(!window.confirm("No has respondido todas las preguntas. ¿Enviar igual?")) return;
-    } else {
-      if(!window.confirm("¿Seguro que deseas enviar tus respuestas?")) return;
-    }
-
-    // Calcular nota
+    if (!window.confirm("¿Enviar respuestas?")) return;
     let correctas = 0;
     examQuestions.forEach(q => {
-      const selectedId = userAnswers[q.id];
       const correctAlt = q.alternativas.find(a => a.es_correcta === 1);
-      if (correctAlt && selectedId === correctAlt.id) correctas++;
+      if (correctAlt && userAnswers[q.id] === correctAlt.id) correctas++;
     });
-
     const notaFinal = examQuestions.length > 0 ? Math.round((correctas / examQuestions.length) * 20) : 0;
-
     setExamResult({ submitted: true, grade: notaFinal });
-    
-    // ACTUALIZAR ESTADO LOCAL (Para que se vea verde inmediatamente)
     setUserGrades(prev => ({ ...prev, [selectedExam.id]: notaFinal }));
-
-    // GUARDAR EN BASE DE DATOS (Para que persista al cerrar)
     if (ipc && currentUserId) {
-      await ipc.invoke('submit-exam-grade', {
-        userId: currentUserId,
-        materialId: selectedExam.id,
-        nota: notaFinal
-      });
-      alert(`Examen enviado. Nota: ${notaFinal}/20`);
+      await ipc.invoke('submit-exam-grade', { userId: currentUserId, materialId: selectedExam.id, nota: notaFinal });
+      alert(`Nota Final: ${notaFinal}/20`);
     }
   };
 
-  // --- LÓGICA DE USUARIO ---
   const handleAuth = async (e) => {
     e.preventDefault();
-    if (!usernameInput || !passwordInput) { alert("Completa todos los campos"); return; }
+    if (!usernameInput || !passwordInput) { alert("Completa los campos"); return; }
     if (!ipc) { setCurrentUser(usernameInput); setShowAuthModal(false); return; }
-
     try {
       const channel = authMode === 'login' ? 'login-user' : 'register-user';
       const result = await ipc.invoke(channel, { username: usernameInput, password: passwordInput });
-      
       if (result.success) {
         const user = authMode === 'login' ? result.user.username : usernameInput;
         const uid = authMode === 'login' ? result.user.id : result.userId;
-        
-        setCurrentUser(user);
-        setCurrentUserId(uid);
-        // Guardamos sesión simple
-        localStorage.setItem('finanzasUser', user);
-        localStorage.setItem('finanzasUserId', uid);
-        
-        // ¡IMPORTANTE! Cargar las notas de este usuario al entrar
-        loadData(uid);
-        setShowAuthModal(false);
-      } else {
-        alert(result.message);
-      }
+        setCurrentUser(user); setCurrentUserId(uid);
+        localStorage.setItem('finanzasUser', user); localStorage.setItem('finanzasUserId', uid);
+        loadData(uid); setShowAuthModal(false);
+      } else { alert(result.message); }
     } catch (err) { console.error(err); }
-    setUsernameInput(''); setPasswordInput(''); setShowPassword(false);
+    setUsernameInput(''); setPasswordInput('');
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setCurrentUserId(null);
-    setUserGrades({}); // Limpiar notas en memoria
-    localStorage.clear();
-    setCurrentView('home');
-  };
-
-  const handleReset = async () => {
-    if (window.confirm("¿BORRAR todo tu progreso y notas? Esta acción no se puede deshacer.")) {
-      if (ipc && currentUserId) await ipc.invoke('reset-progress', currentUserId);
-      setUserGrades({}); 
-      alert("Progreso reiniciado correctamente.");
-      setCurrentView('home');
-    }
-  };
+  const handleLogout = () => { setCurrentUser(null); setCurrentUserId(null); setUserGrades({}); localStorage.clear(); setCurrentView('home'); };
+  const handleReset = async () => { if (ipc && currentUserId && confirm("¿Borrar progreso?")) { await ipc.invoke('reset-progress', currentUserId); setUserGrades({}); alert("Reiniciado."); } };
 
   const getMaterialIcon = (type) => {
     switch(type) {
@@ -273,8 +171,8 @@ export default function App() {
             {currentUser ? (
               <div className="flex items-center gap-3 bg-slate-100 px-4 py-1.5 rounded-full border border-slate-200">
                 <span className="font-bold text-indigo-700">{currentUser}</span>
-                <button onClick={handleReset} className="text-xs text-orange-600 hover:text-orange-800 font-bold border-l border-slate-300 pl-3">Reiniciar</button>
-                <button onClick={handleLogout} className="text-xs text-red-600 hover:text-red-800 font-bold border-l border-slate-300 pl-3">Salir</button>
+                <button onClick={handleReset} className="text-xs text-orange-600 font-bold border-l pl-3 hover:text-orange-800">Reiniciar</button>
+                <button onClick={handleLogout} className="text-xs text-red-600 font-bold border-l pl-3 hover:text-red-800">Salir</button>
               </div>
             ) : <button onClick={() => setShowAuthModal(true)} className="bg-indigo-600 text-white px-5 py-2 rounded font-bold hover:bg-indigo-700">Ingresar</button>}
           </div>
