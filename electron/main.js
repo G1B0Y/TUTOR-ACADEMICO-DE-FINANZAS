@@ -67,11 +67,24 @@ ipcMain.handle('get-syllabus', async () => {
 ipcMain.handle('open-file-native', async (event, { fileName, type }) => {
   try {
     const isDev = process.env.NODE_ENV === 'development';
-    const filePath = isDev 
-      ? path.join(process.cwd(), 'public', 'materiales', fileName)
-      : path.join(__dirname, '../dist/materiales', fileName);
+    let filePath;
     
-    if (!fs.existsSync(filePath)) return { success: false, message: 'Archivo no encontrado' };
+    if (isDev) {
+      // En desarrollo: carpeta public/materiales original
+      filePath = path.join(process.cwd(), 'public', 'materiales', fileName);
+    } else {
+      // En producción: carpeta dist/materiales
+      filePath = path.join(__dirname, '../dist/materiales', fileName);
+      
+      // FIX CRÍTICO PARA WINDOWS:
+      // Si el archivo está dentro de 'app.asar', lo redirigimos a 'app.asar.unpacked'
+      // porque Windows no puede abrir archivos dentro del asar directamente.
+      if (filePath.includes('app.asar')) {
+        filePath = filePath.replace('app.asar', 'app.asar.unpacked');
+      }
+    }
+    
+    if (!fs.existsSync(filePath)) return { success: false, message: `Archivo no encontrado en: ${filePath}` };
 
     if (type === 'video' && fileName.endsWith('.txt')) {
       const url = fs.readFileSync(filePath, 'utf-8').trim();
