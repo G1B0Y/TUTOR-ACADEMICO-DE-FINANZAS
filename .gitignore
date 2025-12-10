@@ -1,0 +1,77 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suoLogs
+
+logs
+.log
+npm-debug.log
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+Dependencias
+
+node_modules
+
+Compilación (React)
+
+dist
+dist-ssr
+
+Compilación (Electron - IMPORTANTE)
+
+dist-electron
+release
+
+Base de Datos Local (IMPORTANTE)
+
+*.db
+*.sqlite
+*.sqlite3
+sistema_finanzas.db
+
+Variables de entorno
+
+.env
+.env.local
+.env.*.local
+
+Editor directories and files
+
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+.ntvs
+*.njsproj
+*.sln
+*.sw?
+
+Archivos de sistema Windows (Thumbs.db)
+
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
